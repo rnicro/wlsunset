@@ -48,6 +48,7 @@ jobs:
           [[ "$checksum" =~ ^[0-9a-f]{64}$ ]]
           grep -Fq 'archs="x86_64-musl"' "$template"
           grep -Fq 'CFLAGS+=" -O2 -march=skylake -mtune=skylake -fno-plt"' "$template"
+          grep -Fq 'configure_args="-Doptimization=2 -Db_lto=true"' "$template"
           bash -n "$template"
           sh -n scripts/publish-release.sh
           sh -n scripts/test-template.sh
@@ -61,7 +62,7 @@ jobs:
             echo "- Void Linux: x86_64-musl"
             echo "- CPU: Intel Skylake / Core i3-6100U"
             echo "- C compiler flags: -O2 -march=skylake -mtune=skylake -fno-plt"
-            echo "- Build system: Meson"
+            echo "- Build system: Meson (optimization level 2, LTO enabled)"
             echo "- Wayland client / wayland-protocols"
             echo "- Build host: GitHub-hosted runner (not the target CPU)"
           } >> "$GITHUB_STEP_SUMMARY"

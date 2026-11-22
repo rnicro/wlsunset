@@ -1,9 +1,9 @@
 # Template file for 'wlsunset'
 pkgname=wlsunset
 version=0.4.0
-revision=1
+revision=2
 build_style=meson
-configure_args="-Doptimization=2"
+configure_args="-Doptimization=2 -Db_lto=true"
 hostmakedepends="scdoc pkg-config wayland-devel"
 makedepends="pkg-config wayland-devel wayland-protocols"
 short_desc="Day/night gamma adjustments for Wayland compositors"

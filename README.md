@@ -7,7 +7,7 @@ This repository packages upstream wlsunset; it does not fork or patch the applic
 ## Target and compatibility
 
 - Void Linux XBPS target: `x86_64-musl` only.
-- CPU target: Intel Skylake (`-O2 -march=skylake -mtune=skylake -fno-plt`).
+- CPU target: Intel Skylake (`-O2 -march=skylake -mtune=skylake -fno-plt`) with Meson link-time optimization (LTO).
 - Reference processor: Intel Core i3-6100U.
 - C library: musl.
 - Build system: Meson.
@@ -22,28 +22,28 @@ wlsunset adjusts display gamma through the Wayland `wlr-gamma-control-unstable-v
 - Source archive: `https://git.sr.ht/~kennylevinsen/wlsunset/archive/0.4.0.tar.gz`.
 - SHA-256: `a86ffb1793fe622802ec25795b69df864715986ecc175f7734e739c9e264ed72`.
 - License: MIT.
-- Build style: Meson, with optimization level 2.
+- Build style: Meson, with optimization level 2 and link-time optimization enabled (`-Db_lto=true`).
 - Build dependencies: `scdoc`, `pkg-config`, `wayland-devel`, and `wayland-protocols` (matching the Void package recipe).
-- Compiler flags: `-O2 -march=skylake -mtune=skylake -fno-plt`.
+- Compiler flags: `-O2 -march=skylake -mtune=skylake -fno-plt`; Meson enables LTO across the executable and generated protocol code.
 
-`scdoc` generates the manual page. Wayland's scanner and protocol definitions are used to build the gamma-control client. The recipe keeps the upstream Meson configuration and does not add patches or unrelated runtime dependencies.
+`scdoc` generates the manual page. Wayland's scanner and protocol definitions are used to build the gamma-control client. LTO lets the linker optimize across the small C translation units and protocol library. It is a sensible code-generation optimization for this small program, but a measurable runtime improvement has not been established on the i3-6100U. `-O3`, fast-math, and PGO are deliberately not enabled: wlsunset spends most of its time waiting for timers, and its math is responsible for display colour calculations.
 
 ## Build and release
 
-GitHub Actions builds the actual `.xbps` package through `xbps-src -A x86_64-musl`. The build runs on a GitHub-hosted runner; its CPU count controls build parallelism, while `-march=skylake` selects the target CPU architecture. A successful build from `main` publishes an immutable versioned GitHub Release containing:
+GitHub Actions builds the actual `.xbps` package through `xbps-src -A x86_64-musl`. The build runs on a GitHub-hosted runner; its CPU count controls build parallelism, while `-march=skylake` selects the target CPU architecture. A successful build from `main` publishes an versioned GitHub Release containing:
 
 ```text
-wlsunset-0.4.0_1.x86_64-musl.xbps
+wlsunset-0.4.0_2.x86_64-musl.xbps
 ```
 
 Download the package from [GitHub Releases](https://github.com/rnicro/wlsunset/releases). Install the downloaded package locally:
 
 ```sh
-sudo xbps-install ./wlsunset-0.4.0_1.x86_64-musl.xbps
+sudo xbps-install ./wlsunset-0.4.0_2.x86_64-musl.xbps
 wlsunset -h
 ```
 
-These are standalone XBPS package files, not a signed, indexed XBPS repository. The release workflow refuses to replace an existing package asset with different bytes; increment `revision` in `srcpkgs/wlsunset/template` whenever a packaging change alters the generated package.
+These are standalone XBPS package files, not a signed, indexed XBPS repository. The release workflow refuses to replace an existing package asset with different bytes; increment `revision` in `srcpkgs/wlsunset/template` whenever a packaging change alters the generated package. Revision 2 enables Meson LTO; revision 1 remains available as the original non-LTO build.
 
 ## Build locally
 

@@ -47,7 +47,7 @@ Target:
 Packaging:
 - Upstream source: https://sr.ht/~kennylevinsen/wlsunset/
 - Void Linux recipe baseline: https://github.com/void-linux/void-packages/tree/master/srcpkgs/wlsunset
-- Build system: Meson
+- Build system: Meson (optimization level 2, LTO enabled)
 - Wayland client and wayland-protocols support
 - Package asset: $package_name
 
