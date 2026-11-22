@@ -1,0 +1,162 @@
+name: Build wlsunset for Void Linux x86_64-musl / Intel Skylake
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "srcpkgs/wlsunset/**"
+      - "scripts/**"
+      - ".github/workflows/build.yml"
+      - "README.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wlsunset-x86_64-musl-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  XBPS_TARGET_ARCH: x86_64-musl
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    outputs:
+      version: ${{ steps.meta.outputs.version }}
+      revision: ${{ steps.meta.outputs.revision }}
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - name: Checkout package repository
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Validate package metadata and target
+        id: meta
+        run: |
+          set -euo pipefail
+          template=srcpkgs/wlsunset/template
+          version="$(sed -n 's/^version=//p' "$template")"
+          revision="$(sed -n 's/^revision=//p' "$template")"
+          checksum="$(sed -n 's/^checksum=//p' "$template")"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$revision" =~ ^[0-9]+$ ]]
+          [[ "$checksum" =~ ^[0-9a-f]{64}$ ]]
+          grep -Fq 'archs="x86_64-musl"' "$template"
+          grep -Fq 'CFLAGS+=" -O2 -march=skylake -mtune=skylake -fno-plt"' "$template"
+          bash -n "$template"
+          sh -n scripts/publish-release.sh
+          sh -n scripts/test-template.sh
+          sh scripts/test-template.sh
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "revision=$revision" >> "$GITHUB_OUTPUT"
+          echo "tag=${version}_${revision}" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Build target"
+            echo
+            echo "- Void Linux: x86_64-musl"
+            echo "- CPU: Intel Skylake / Core i3-6100U"
+            echo "- C compiler flags: -O2 -march=skylake -mtune=skylake -fno-plt"
+            echo "- Build system: Meson"
+            echo "- Wayland client / wayland-protocols"
+            echo "- Build host: GitHub-hosted runner (not the target CPU)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Checkout Void packages
+        uses: actions/checkout@v6
+        with:
+          repository: void-linux/void-packages
+          ref: master
+          path: void-packages
+          persist-credentials: false
+
+      - name: Overlay the wlsunset package
+        run: |
+          set -euo pipefail
+          rm -rf void-packages/srcpkgs/wlsunset
+          mkdir -p void-packages/srcpkgs/wlsunset
+          cp -a srcpkgs/wlsunset/. void-packages/srcpkgs/wlsunset/
+
+      - name: Install static xbps
+        run: |
+          set -euo pipefail
+          mkdir -p /opt/xbps
+          curl --fail --location --retry 5 --retry-all-errors \
+            --connect-timeout 30 --max-time 300 \
+            --output /tmp/xbps-static.tar.xz \
+            https://repo-default.voidlinux.org/static/xbps-static-latest.x86_64-musl.tar.xz
+          tar -xJf /tmp/xbps-static.tar.xz -C /opt/xbps
+          rm -f /tmp/xbps-static.tar.xz
+          echo "/opt/xbps/usr/bin" >> "$GITHUB_PATH"
+
+      - name: Bootstrap xbps-src for x86_64-musl
+        working-directory: void-packages
+        run: |
+          set -euo pipefail
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          printf 'XBPS_MAKEJOBS=%s\n' "$(nproc)" >> etc/conf
+          ./xbps-src -A "$XBPS_TARGET_ARCH" binary-bootstrap
+
+      - name: Build wlsunset package
+        working-directory: void-packages
+        run: |
+          set -euo pipefail
+          ./xbps-src -A "$XBPS_TARGET_ARCH" pkg wlsunset
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          package_name="wlsunset-${{ steps.meta.outputs.version }}_${{ steps.meta.outputs.revision }}.x86_64-musl.xbps"
+          mapfile -t packages < <(
+            find hostdir/binpkgs -type f -name "$package_name" -print
+          )
+          if [[ "${#packages[@]}" -ne 1 ]]; then
+            printf 'Expected exactly one wlsunset package, found %s\n' "${#packages[@]}" >&2
+            find hostdir/binpkgs -type f -name '*wlsunset*.xbps' -print >&2
+            exit 1
+          fi
+          cp "${packages[0]}" "$GITHUB_WORKSPACE/dist/"
+          package_path="$GITHUB_WORKSPACE/dist/$package_name"
+          printf -- '- **Package size:** %s bytes (%s)\n' \
+            "$(stat -c '%s' "$package_path")" "$(du -h "$package_path" | cut -f1)" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload xbps package
+        uses: actions/upload-artifact@v7
+        with:
+          name: wlsunset-x86_64-musl
+          path: dist/*.xbps
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  release:
+    name: Publish versioned GitHub Release
+    if: github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout release helper
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Download successful package build
+        uses: actions/download-artifact@v8
+        with:
+          name: wlsunset-x86_64-musl
+          path: dist
+
+      - name: Publish or verify immutable release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          REVISION: ${{ needs.build.outputs.revision }}
+          TAG: ${{ needs.build.outputs.tag }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: sh scripts/publish-release.sh dist
